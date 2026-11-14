@@ -98,10 +98,21 @@ def extract_frames(video: Path, duration: float | None, out_dir: Path) -> list[b
 
 
 def _transcribe(media: Path) -> str:
+    import numpy as np
     from faster_whisper import WhisperModel  # optional dependency
 
+    # Decode with ffmpeg ourselves rather than faster-whisper's PyAV path, which
+    # breaks whenever PyAV changes its API.
+    raw = subprocess.run(
+        ["ffmpeg", "-loglevel", "error", "-i", str(media), "-vn", "-ac", "1", "-ar", "16000",
+         "-f", "f32le", "-"],
+        check=True, capture_output=True,
+    ).stdout
+    audio = np.frombuffer(raw, dtype=np.float32)
+    if audio.size == 0:
+        return ""
     model = WhisperModel("small", device="cpu", compute_type="int8")
-    segments, _ = model.transcribe(str(media))
+    segments, _ = model.transcribe(audio)
     return " ".join(s.text.strip() for s in segments)
 
 
@@ -152,6 +163,8 @@ def fetch(url: str, transcribe: bool = False, frames: bool = True) -> TikTokPost
                     post.warnings.append(
                         "Transcription skipped: install with `pip install .[transcribe]`."
                     )
+                except Exception as exc:  # noqa: BLE001 - keep caption and frames
+                    post.warnings.append(f"Transcription failed ({exc}).")
     except Exception as exc:  # noqa: BLE001 - fall back to oEmbed below
         post.warnings.append(f"yt-dlp could not read the post ({exc}); trying oEmbed.")
 
