@@ -18,12 +18,13 @@ from .extract import extract_recipe
 
 def rebuild_index(site_dir: Path) -> None:
     recipes_dir = site_dir / "recipes"
-    pages = sorted(recipes_dir.glob("*.html"), key=lambda p: p.stat().st_mtime, reverse=True)
     entries = []
+    pages = recipes_dir.glob("*.html") if recipes_dir.exists() else []
     for page in pages:
         m = re.search(r"<title>(.*?)</title>", page.read_text(encoding="utf-8"), re.S)
         title = html.unescape(m.group(1)) if m else page.stem
         entries.append((title, f"recipes/{page.name}"))
+    entries.sort(key=lambda e: e[0].lower())
     (site_dir / "index.html").write_text(render.index_html(entries), encoding="utf-8")
 
 
@@ -70,6 +71,11 @@ def main(argv: list[str] | None = None) -> int:
     recipes_dir = args.site_dir / "recipes"
     recipes_dir.mkdir(parents=True, exist_ok=True)
     page = recipes_dir / f"{slug}.html"
+    n = 2
+    # A different video's recipe with the same name gets its own page.
+    while page.exists() and html.escape(args.url) not in page.read_text(encoding="utf-8"):
+        page = recipes_dir / f"{slug}-{n}.html"
+        n += 1
     page.write_text(render.to_html(recipe, args.url, post.author, post.thumbnail), encoding="utf-8")
     rebuild_index(args.site_dir)
 

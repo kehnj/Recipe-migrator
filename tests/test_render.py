@@ -63,3 +63,13 @@ def test_frame_extraction(tmp_path):
     frames = tiktok.extract_frames(video, 40, out)
     assert 10 <= len(frames) <= tiktok.MAX_FRAMES
     assert frames[0][:2] == b"\xff\xd8"  # JPEG
+
+
+def test_same_name_different_video_gets_new_page(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.tiktok, "fetch", lambda url, transcribe=False, frames=True: tiktok.TikTokPost(url=url, caption="x"))
+    monkeypatch.setattr(cli, "extract_recipe", lambda src, notes, images: sample())
+    site = tmp_path / "docs"
+    for url in ("https://www.tiktok.com/t/A/", "https://www.tiktok.com/t/B/", "https://www.tiktok.com/t/A/"):
+        assert cli.main([url, "--site-dir", str(site)]) == 0
+    names = sorted(p.name for p in (site / "recipes").glob("*.html"))
+    assert names == ["garlic-butter-noodles-script-2.html", "garlic-butter-noodles-script.html"]

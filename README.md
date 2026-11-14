@@ -15,7 +15,12 @@ TikTok link ──► description + subtitles + video frames (on-screen text) + 
             ──► AnyList "Import Recipe from Web"
 ```
 
-## Everyday use (from your phone)
+## Everyday use: the iPhone Shortcut (2 taps)
+
+In TikTok, tap **Share → More → Save to AnyList**. When the share sheet pops up, tap **AnyList**.
+Setup is in [SHORTCUT.md](SHORTCUT.md).
+
+## Alternative: open a GitHub issue
 
 1. In TikTok, tap **Share → Copy link**.
 2. Open a **new issue** in this repo and paste the link into the title. That's all.
