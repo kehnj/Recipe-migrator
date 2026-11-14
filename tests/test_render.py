@@ -40,8 +40,8 @@ def test_vtt_parsing_dedupes():
 
 
 def test_cli_end_to_end(tmp_path, monkeypatch):
-    monkeypatch.setattr(cli.tiktok, "fetch", lambda url, transcribe=False: tiktok.TikTokPost(url=url, caption="noodles!", author="chef"))
-    monkeypatch.setattr(cli, "extract_recipe", lambda src, notes: sample())
+    monkeypatch.setattr(cli.tiktok, "fetch", lambda url, transcribe=False, frames=True: tiktok.TikTokPost(url=url, caption="noodles!", author="chef"))
+    monkeypatch.setattr(cli, "extract_recipe", lambda src, notes, images: sample())
     out = tmp_path / "r.json"
     rc = cli.main(["https://www.tiktok.com/@a/video/1", "--site-dir", str(tmp_path / "docs"),
                    "--base-url", "https://me.github.io/repo", "--json-out", str(out)])
@@ -49,3 +49,17 @@ def test_cli_end_to_end(tmp_path, monkeypatch):
     r = json.loads(out.read_text())
     assert r["public_url"] == "https://me.github.io/repo/recipes/garlic-butter-noodles-script.html"
     assert "garlic-butter-noodles" in (tmp_path / "docs" / "index.html").read_text()
+
+
+def test_frame_extraction(tmp_path):
+    import shutil, subprocess
+    import pytest
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg not installed")
+    video = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=duration=40:size=320x240:rate=10",
+                    str(video)], check=True)
+    out = tmp_path / "f"; out.mkdir()
+    frames = tiktok.extract_frames(video, 40, out)
+    assert 10 <= len(frames) <= tiktok.MAX_FRAMES
+    assert frames[0][:2] == b"\xff\xd8"  # JPEG

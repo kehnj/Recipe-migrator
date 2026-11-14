@@ -2,7 +2,7 @@ name: Import TikTok recipe
 
 # Two ways to run this:
 #  1. Open an issue whose title or body contains a TikTok link (easy from a phone).
-#     Optionally paste the video's caption into the body as a backup.
+#     Just the share link is enough. Screenshots attached to the issue are also read.
 #  2. Actions tab -> "Import TikTok recipe" -> Run workflow.
 on:
   issues:
@@ -13,7 +13,7 @@ on:
         description: TikTok video URL
         required: true
       notes:
-        description: Optional - caption or recipe text you copied from the video
+        description: Optional - any extra text to consider
         required: false
 
 permissions:
@@ -40,7 +40,9 @@ jobs:
           python-version: "3.12"
 
       - name: Install
-        run: pip install ".[transcribe]"
+        run: |
+          command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+          pip install ".[transcribe]"
 
       - name: Work out the URL and notes
         id: input
@@ -56,12 +58,38 @@ jobs:
           m = re.search(r"https?://(?:www\.|vm\.|vt\.|m\.)?tiktok\.com/[^\s)\]>\"']+", text)
           if not m:
               raise SystemExit("No TikTok URL found")
-          body = os.environ.get("ISSUE_BODY", "").replace(m.group(0), "")
+          body = os.environ.get("ISSUE_BODY", "") or ""
+          # Screenshots attached to the issue (GitHub turns them into image links).
+          images = re.findall(r"https://(?:github\.com/user-attachments/assets|user-images\.githubusercontent\.com|private-user-images\.githubusercontent\.com)/[^\s)\]>\"']+", body)
+          open("images.txt", "w").write("\n".join(images))
+          for u in images + [m.group(0)]:
+              body = body.replace(u, "")
+          body = re.sub(r"!\[[^\]]*\]\(\)|<img[^>]*>", "", body)
           notes = (os.environ.get("DISPATCH_NOTES", "") + "\n" + body).strip()
           open("notes.txt", "w").write(notes)
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"url={m.group(0)}\n")
           PY
+
+      - name: Download attached screenshots
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p shots
+          i=0
+          while read -r u; do
+            [ -z "$u" ] && continue
+            i=$((i+1))
+            curl -sSfL -H "Authorization: Bearer $GH_TOKEN" "$u" -o "shots/raw_$i" || continue
+            type=$(file -b --mime-type "shots/raw_$i")
+            case "$type" in
+              image/png) mv "shots/raw_$i" "shots/$i.png" ;;
+              image/jpeg) mv "shots/raw_$i" "shots/$i.jpg" ;;
+              image/webp) mv "shots/raw_$i" "shots/$i.webp" ;;
+              *) rm -f "shots/raw_$i" ;;
+            esac
+          done < images.txt
+          ls shots
 
       - name: Convert recipe
         env:
@@ -70,7 +98,9 @@ jobs:
         run: |
           owner="$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
           repo="${GITHUB_REPOSITORY#*/}"
-          recipe-migrator "$URL" --transcribe --notes-file notes.txt \
+          img_args=()
+          for f in shots/*; do [ -f "$f" ] && img_args+=(--image "$f"); done
+          recipe-migrator "$URL" --transcribe --notes-file notes.txt "${img_args[@]}" \
             --base-url "https://${owner}.github.io/${repo}" --json-out result.json
 
       - name: Publish page
@@ -115,4 +145,4 @@ jobs:
           script: |
             const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number,
-              body: `Couldn't import this one. If TikTok blocked the download, paste the video's caption (or type the recipe) into a new issue along with the link. [Run log](${run})` });
+              body: `Couldn't import this one. TikTok may have blocked the download. Try again with screenshots: open a new issue with the link, and attach screenshots of the video's description and any on-screen recipe text. [Run log](${run})` });

@@ -30,7 +30,10 @@ def rebuild_index(site_dir: Path) -> None:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Convert a TikTok recipe for AnyList import.")
     p.add_argument("url", help="TikTok video URL (share link is fine)")
-    p.add_argument("--notes", default="", help="Extra text, e.g. a caption you copied by hand")
+    p.add_argument("--notes", default="", help="Optional extra text to consider")
+    p.add_argument("--image", type=Path, action="append", default=[],
+                   help="Screenshot of the video or its description (repeatable)")
+    p.add_argument("--no-frames", action="store_true", help="Don't read on-screen text from video frames")
     p.add_argument("--notes-file", type=Path, help="Read extra text from a file")
     p.add_argument("--transcribe", action="store_true", help="Transcribe the audio (needs .[transcribe])")
     p.add_argument("--site-dir", type=Path, default=Path("docs"), help="Where to write the HTML page")
@@ -43,17 +46,24 @@ def main(argv: list[str] | None = None) -> int:
         notes = (notes + "\n" + args.notes_file.read_text(encoding="utf-8")).strip()
 
     print(f"Fetching {args.url} ...", file=sys.stderr)
-    post = tiktok.fetch(args.url, transcribe=args.transcribe)
+    post = tiktok.fetch(args.url, transcribe=args.transcribe, frames=not args.no_frames)
     for w in post.warnings:
         print(f"warning: {w}", file=sys.stderr)
-    if not (post.caption or post.subtitles or post.transcript or notes):
-        print("error: couldn't read any text from that post. Paste the caption with --notes.", file=sys.stderr)
+    images = [tiktok.image_block(f) for f in post.frames]
+    for path in args.image:
+        suffix = path.suffix.lower().lstrip(".")
+        media_type = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+                      "webp": "image/webp", "gif": "image/gif"}.get(suffix)
+        if media_type and path.exists():
+            images.append(tiktok.image_block(path.read_bytes(), media_type))
+    if not (post.has_content() or notes or images):
+        print("error: couldn't read anything from that post. Attach screenshots with --image.", file=sys.stderr)
         return 2
 
     print("Extracting recipe with Claude ...", file=sys.stderr)
-    recipe = extract_recipe(post.source_text(), notes)
+    recipe = extract_recipe(post.source_text(), notes, images)
     if not recipe.found_recipe:
-        print("error: no recipe found in the post text. Try --transcribe or --notes.", file=sys.stderr)
+        print("error: no recipe found in the post text. Try --transcribe or --image.", file=sys.stderr)
         return 3
 
     slug = render.slugify(recipe.name)

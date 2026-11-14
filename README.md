@@ -6,9 +6,11 @@ AnyList has no public API. It can import any web page that carries standard
 [schema.org Recipe](https://schema.org/Recipe) data, the format most recipe sites use.
 This tool does the conversion:
 
+All you provide is the TikTok **share link**. You never copy text out of TikTok.
+
 ```
-TikTok link ──► caption + on-screen subtitles (+ optional speech transcript)
-            ──► Claude extracts a clean recipe (ingredients, steps, times)
+TikTok link ──► description + subtitles + video frames (on-screen text) + speech transcript
+            ──► Claude reads all of it and extracts a clean recipe (ingredients, steps, times)
             ──► recipe page with schema.org data, published on GitHub Pages
             ──► AnyList "Import Recipe from Web"
 ```
@@ -16,9 +18,11 @@ TikTok link ──► caption + on-screen subtitles (+ optional speech transcrip
 ## Everyday use (from your phone)
 
 1. In TikTok, tap **Share → Copy link**.
-2. Open a **new issue** in this repo and paste the link into the title.
-   - If the recipe is only spoken or shown on screen, also paste the caption, or type
-     the ingredients, into the issue body. The tool combines this with what it pulls from the video.
+2. Open a **new issue** in this repo and paste the link into the title. That's all.
+   - The tool downloads the video and reads the description, the spoken audio and any
+     recipe text shown on screen.
+   - Optional backup: attach **screenshots** to the issue (for example, of the expanded
+     description). They're read too.
 3. About a minute later the bot comments on the issue with a link like
    `https://<you>.github.io/Recipe-migrator/recipes/garlic-butter-noodles.html`.
 4. In AnyList, go to **Recipes → + → Import Recipe from Web**. Paste that link and tap **Import**.
@@ -51,16 +55,18 @@ recipe-migrator "https://www.tiktok.com/@creator/video/123" --transcribe
 This prints the recipe as text, so you can paste it into AnyList. It also writes
 `docs/recipes/<name>.html`. Useful flags:
 
-- `--notes "..."` / `--notes-file f.txt`: add a caption or recipe text you copied by hand
+- `--image shot.png` (repeatable): also read screenshots
+- `--notes "..."` / `--notes-file f.txt`: optional extra text
 - `--base-url https://you.github.io/Recipe-migrator`: print the public import link
 - `--transcribe`: transcribe the spoken audio with Whisper, for videos where the recipe is only spoken
+- `--no-frames`: skip reading on-screen text from video frames (frames need `ffmpeg`)
 
 ## Limitations
 
-- **Recipes that are only shown on screen** (text overlays with no caption or speech) can't
-  be read automatically. Paste or type them into the issue body.
 - **TikTok sometimes blocks automated downloads.** The tool then falls back to TikTok's public
-  oEmbed endpoint, which still returns the caption. If that fails too, use the notes field.
+  oEmbed endpoint, which still returns the description, but without the video it can't read on-screen
+  text or speech. If that happens, attach screenshots to a new issue.
+- Up to 16 frames are sampled per video. On-screen text that flashes by very briefly can be missed.
 - When the creator gives no quantities, they're left out rather than guessed. If anything had to be
   estimated, the page shows a warning.
 
