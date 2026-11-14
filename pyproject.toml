@@ -1,0 +1,25 @@
+[project]
+name = "recipe-migrator"
+version = "0.1.0"
+description = "Turn a TikTok recipe video into an AnyList-importable recipe."
+requires-python = ">=3.10"
+dependencies = [
+  "anthropic>=0.80",
+  "pydantic>=2",
+  "yt-dlp[default,curl-cffi]",
+]
+
+[project.optional-dependencies]
+# Transcribes the spoken audio when the caption doesn't contain the full recipe.
+transcribe = ["faster-whisper"]
+dev = ["pytest"]
+
+[project.scripts]
+recipe-migrator = "recipe_migrator.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["recipe_migrator"]

@@ -1,0 +1,118 @@
+name: Import TikTok recipe
+
+# Two ways to run this:
+#  1. Open an issue whose title or body contains a TikTok link (easy from a phone).
+#     Optionally paste the video's caption into the body as a backup.
+#  2. Actions tab -> "Import TikTok recipe" -> Run workflow.
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      url:
+        description: TikTok video URL
+        required: true
+      notes:
+        description: Optional - caption or recipe text you copied from the video
+        required: false
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: import-recipe
+  cancel-in-progress: false
+
+jobs:
+  import:
+    # Only the repo owner can trigger it, so strangers can't spend your API credits.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.issue.user.login == github.repository_owner &&
+       contains(format('{0} {1}', github.event.issue.title, github.event.issue.body), 'tiktok.com'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install ".[transcribe]"
+
+      - name: Work out the URL and notes
+        id: input
+        env:
+          DISPATCH_URL: ${{ inputs.url }}
+          DISPATCH_NOTES: ${{ inputs.notes }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          python - <<'PY'
+          import os, re
+          text = " ".join(os.environ.get(k, "") for k in ("DISPATCH_URL", "ISSUE_TITLE", "ISSUE_BODY"))
+          m = re.search(r"https?://(?:www\.|vm\.|vt\.|m\.)?tiktok\.com/[^\s)\]>\"']+", text)
+          if not m:
+              raise SystemExit("No TikTok URL found")
+          body = os.environ.get("ISSUE_BODY", "").replace(m.group(0), "")
+          notes = (os.environ.get("DISPATCH_NOTES", "") + "\n" + body).strip()
+          open("notes.txt", "w").write(notes)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"url={m.group(0)}\n")
+          PY
+
+      - name: Convert recipe
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          URL: ${{ steps.input.outputs.url }}
+        run: |
+          owner="$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          repo="${GITHUB_REPOSITORY#*/}"
+          recipe-migrator "$URL" --transcribe --notes-file notes.txt \
+            --base-url "https://${owner}.github.io/${repo}" --json-out result.json
+
+      - name: Publish page
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898699+github-actions[bot]@users.noreply.github.com"
+          git add docs
+          git diff --cached --quiet && exit 0
+          git commit -m "Add recipe: $(python -c 'import json;print(json.load(open("result.json"))["name"])')"
+          git push
+
+      - name: Reply on the issue
+        if: github.event_name == 'issues'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const r = JSON.parse(require('fs').readFileSync('result.json', 'utf8'));
+            const body = [
+              `**${r.name}** is ready.`,
+              ``,
+              `**Import into AnyList:** open AnyList → Recipes → **+** → **Import Recipe from Web**, and paste:`,
+              ``,
+              r.public_url,
+              ``,
+              `(GitHub Pages can take a minute to update.)`,
+              r.inferred ? `\n⚠️ Some quantities or steps were estimated — double-check against the video.` : ``,
+              ``,
+              `<details><summary>Plain-text version (for copy/paste)</summary>`,
+              ``,
+              '```',
+              r.text,
+              '```',
+              `</details>`,
+            ].join('\n');
+            await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body });
+            await github.rest.issues.update({ ...context.repo, issue_number: context.issue.number, state: 'closed' });
+
+      - name: Report failure on the issue
+        if: failure() && github.event_name == 'issues'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number,
+              body: `Couldn't import this one. If TikTok blocked the download, paste the video's caption (or type the recipe) into a new issue along with the link. [Run log](${run})` });
